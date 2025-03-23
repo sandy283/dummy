@@ -60,7 +60,6 @@ def summarize_text(text: str) -> str:
 
 def check_and_summarize(summary: str) -> str:
     if count_tokens(summary) > TOKEN_THRESHOLD:
-        st.info("Conversation summary exceeds token threshold. Summarizing...")
         return summarize_text(summary)
     return summary
 
