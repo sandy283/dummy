@@ -11,7 +11,7 @@ from sentence_transformers import SentenceTransformer
 SUMMARY_FILE = "chat_summary.txt"
 TOKEN_THRESHOLD = 2000
 
-# Initialize embeddings and ChromaDB client
+# Initialize embedding and ChromaDB client
 embedder = SentenceTransformer('all-MiniLM-L6-v2')
 client = chromadb.Client(Settings(
     chroma_db_impl="duckdb+parquet",
@@ -60,10 +60,11 @@ def summarize_text(text: str) -> str:
 
 def check_and_summarize(summary: str) -> str:
     if count_tokens(summary) > TOKEN_THRESHOLD:
+        st.info("Conversation summary exceeds token threshold. Summarizing...")
         return summarize_text(summary)
     return summary
 
-# Inject custom CSS for ChatGPT-like UI
+# Custom CSS for ChatGPT-like appearance
 st.markdown(
     """
     <style>
@@ -116,16 +117,22 @@ if "chat_history" not in st.session_state:
 if "conversation_summary" not in st.session_state:
     st.session_state.conversation_summary = load_conversation_summary()
 
-# Function to display chat messages with auto-scroll
-def display_chat():
+# Create two columns: left for chat history, right for input
+left_col, right_col = st.columns([3, 1])
+left_container = left_col.empty()  # Container for the single chat box
+
+def display_chat(temp_message: str = None):
     chat_html = '<div id="chat_container">'
     for speaker, message in st.session_state.chat_history:
         if speaker.lower() == "user":
             chat_html += f'<div class="chat-message user"><strong>User:</strong> {message}</div>'
         else:
             chat_html += f'<div class="chat-message bot"><strong>Bot:</strong> {message}</div>'
+    # Append temporary bot message (streaming) if provided
+    if temp_message:
+        chat_html += f'<div class="chat-message bot"><strong>Bot:</strong> {temp_message}</div>'
     chat_html += "</div>"
-    st.markdown(chat_html, unsafe_allow_html=True)
+    left_container.markdown(chat_html, unsafe_allow_html=True)
     st.components.v1.html(
         """
         <script>
@@ -138,51 +145,45 @@ def display_chat():
         height=0,
     )
 
-# Display current chat history
-display_chat()
+with right_col:
+    user_input = st.text_input("Your Message:", key="user_input_field")
+    if st.button("Send") and user_input:
+        # Append user's message and update chat history display
+        st.session_state.chat_history.append(("User", user_input))
+        display_chat()
 
-# Input area for user message
-user_input = st.text_input("Your Message:", key="user_input_field")
-
-if st.button("Send") and user_input:
-    # Append user message to history and update display
-    st.session_state.chat_history.append(("User", user_input))
-    display_chat()
-
-    # Build prompt with retrieved context
-    results = query_chromadb(user_input)
-    retrieved_docs = results.get("documents", [])
-    flat_docs = [doc for sublist in retrieved_docs for doc in sublist]
-    docs_str = "\n".join(flat_docs)
-    
-    prompt = (
-        "You are an expert customer service assistant. Use the following information to answer the client's query.\n\n"
-        f"Conversation History:\n{st.session_state.conversation_summary}\n\n"
-        f"Client Query: {user_input}\n\n"
-        "## Retrieved Context from Website Knowledge Base:\n"
-        f"{docs_str}\n\n"
-        "Provide a clear, accurate, and detailed answer. "
-        "If the context is incomplete, mention any assumptions and suggest what additional details might be needed."
-    )
-    
-    # Generate and stream bot response
-    placeholder = st.empty()
-    answer_chunks = []
-    stream = model.generate_content([prompt], stream=True)
-    bot_response = ""
-    for chunk in stream:
-        answer_chunks.append(chunk.text)
-        bot_response = "".join(answer_chunks)
-        placeholder.markdown(f'<div class="chat-message bot"><strong>Bot:</strong> {bot_response}</div>', unsafe_allow_html=True)
-        time.sleep(0.1)
-    placeholder.empty()
-    
-    # Append full bot response and update conversation summary
-    st.session_state.chat_history.append(("Bot", bot_response))
-    new_turn = f"User: {user_input}\nBot: {bot_response}"
-    st.session_state.conversation_summary = update_conversation_summary(st.session_state.conversation_summary, [new_turn])
-    st.session_state.conversation_summary = check_and_summarize(st.session_state.conversation_summary)
-    save_conversation_summary(st.session_state.conversation_summary)
-    
-    # Update chat display
-    display_chat()
+        # Retrieve context from ChromaDB
+        results = query_chromadb(user_input)
+        retrieved_docs = results.get("documents", [])
+        flat_docs = [doc for sublist in retrieved_docs for doc in sublist]
+        docs_str = "\n".join(flat_docs)
+        
+        prompt = (
+            "You are an expert customer service assistant. Use the following information to answer the client's query.\n\n"
+            f"Conversation History:\n{st.session_state.conversation_summary}\n\n"
+            f"Client Query: {user_input}\n\n"
+            "## Retrieved Context from Website Knowledge Base:\n"
+            f"{docs_str}\n\n"
+            "Provide a clear, accurate, and detailed answer. "
+            "If the context is incomplete, mention any assumptions and suggest what additional details might be needed."
+        )
+        
+        # Stream bot response while updating the single chat container
+        bot_msg = ""
+        stream = model.generate_content([prompt], stream=True)
+        for chunk in stream:
+            bot_msg += chunk.text
+            display_chat(temp_message=bot_msg)
+            time.sleep(0.1)
+        
+        # Append bot response to conversation history
+        st.session_state.chat_history.append(("Bot", bot_msg))
+        new_turn = f"User: {user_input}\nBot: {bot_msg}"
+        st.session_state.conversation_summary = update_conversation_summary(
+            st.session_state.conversation_summary, [new_turn]
+        )
+        st.session_state.conversation_summary = check_and_summarize(
+            st.session_state.conversation_summary
+        )
+        save_conversation_summary(st.session_state.conversation_summary)
+        # Optionally, clear input by using a different key or instructing the user to overwrite the field.
