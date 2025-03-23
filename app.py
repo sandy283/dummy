@@ -179,7 +179,7 @@ if st.button("Send") and user_input:
         f"Client Query: {user_input}\n\n"
         "## Retrieved Context from Website Knowledge Base:\n"
         f"{docs_str}\n\n"
-        "Provide a clear, accurate, and detailed answer. If the retrieved context is incomplete or irrelevant to the user's query, simply reply politely 'I don't know.' "
+        "Provide a clear, accurate, and detailed answer. You can answer with an assumption if the retrieved context is incomplete or irrelevant to the user's query. "
         "When you need to assume details beyond the retrieved context, prepend your answer with the tag [ASSUMPTION] before mentioning any information not found in the context."
     )
     
