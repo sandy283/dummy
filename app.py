@@ -158,6 +158,14 @@ def display_chat(temp_message: str = ""):
 # Display the persistent chat history container
 display_chat()
 
+# Button to clear chat history
+if st.button("Clear Chat History"):
+    st.session_state.chat_history = []
+    st.session_state.conversation_summary = "No previous conversation."
+    if Path(SUMMARY_FILE).exists():
+        os.remove(SUMMARY_FILE)
+    display_chat()
+
 # Input area for user message
 user_input = st.text_input("Your Message:", key="user_input_field")
 
