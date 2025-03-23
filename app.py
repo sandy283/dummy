@@ -176,7 +176,8 @@ if st.button("Send") and user_input:
         "## Retrieved Context from Website Knowledge Base:\n"
         f"{docs_str}\n\n"
         "Provide a clear, accurate, and detailed answer. "
-        "If the context is incomplete, mention any assumptions and suggest what additional details might be needed."
+        "If the retrieved context is incomplete or irrelevant to the user query, don't frame your answer. Just answer politely i don't know."
+        "When you don't see any relevance of users query to the retrieved context, you are allowed to assume and answer on your own but do mention [ASSUMPTION] tag before mentioning anything which is not in the retrieved context."
     )
     
     # Generate and stream bot response
