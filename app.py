@@ -11,7 +11,7 @@ from sentence_transformers import SentenceTransformer
 SUMMARY_FILE = "chat_summary.txt"
 TOKEN_THRESHOLD = 2000
 
-# Initialize embedding and ChromaDB client
+# Initialize embeddings and ChromaDB client
 embedder = SentenceTransformer('all-MiniLM-L6-v2')
 client = chromadb.Client(Settings(
     chroma_db_impl="duckdb+parquet",
@@ -60,37 +60,50 @@ def summarize_text(text: str) -> str:
 
 def check_and_summarize(summary: str) -> str:
     if count_tokens(summary) > TOKEN_THRESHOLD:
-        st.info("Conversation summary exceeds token threshold. Summarizing...")
         return summarize_text(summary)
     return summary
 
-# Custom CSS for ChatGPT-like appearance
+# Inject custom CSS for creative, ChatGPT-style UI with icons
 st.markdown(
     """
     <style>
     #chat_container {
       height: 500px;
       overflow-y: auto;
-      border: 1px solid #ccc;
-      padding: 10px;
-      background-color: #f9f9f9;
+      border: 2px solid #ddd;
+      padding: 15px;
+      background: linear-gradient(135deg, #f0f9ff, #e0f7fa);
+      border-radius: 8px;
     }
     .chat-message {
       margin: 10px 0;
-      padding: 10px;
-      border-radius: 10px;
+      padding: 12px 15px;
+      border-radius: 15px;
       max-width: 70%;
       word-wrap: break-word;
+      font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+      box-shadow: 2px 2px 6px rgba(0, 0, 0, 0.1);
     }
     .chat-message.user {
       background-color: #DCF8C6;
       margin-left: auto;
-      text-align: right;
+      text-align: left;
+      border: 1px solid #badbcc;
     }
     .chat-message.bot {
       background-color: #F1F0F0;
       margin-right: auto;
       text-align: left;
+      border: 1px solid #ddd;
+    }
+    /* Add icons using pseudo-elements */
+    .chat-message.user::before {
+      content: "👤 ";
+      font-size: 1.2em;
+    }
+    .chat-message.bot::before {
+      content: "🤖 ";
+      font-size: 1.2em;
     }
     </style>
     """,
@@ -117,22 +130,16 @@ if "chat_history" not in st.session_state:
 if "conversation_summary" not in st.session_state:
     st.session_state.conversation_summary = load_conversation_summary()
 
-# Create two columns: left for chat history, right for input & controls
-left_col, right_col = st.columns([3, 1])
-left_container = left_col.empty()  # Single chat history container
-
-def display_chat(temp_message: str = None):
+# Function to display chat messages with auto-scroll
+def display_chat():
     chat_html = '<div id="chat_container">'
     for speaker, message in st.session_state.chat_history:
         if speaker.lower() == "user":
             chat_html += f'<div class="chat-message user"><strong>User:</strong> {message}</div>'
         else:
             chat_html += f'<div class="chat-message bot"><strong>Bot:</strong> {message}</div>'
-    # Append temporary bot message if provided (for streaming)
-    if temp_message:
-        chat_html += f'<div class="chat-message bot"><strong>Bot:</strong> {temp_message}</div>'
     chat_html += "</div>"
-    left_container.markdown(chat_html, unsafe_allow_html=True)
+    st.markdown(chat_html, unsafe_allow_html=True)
     st.components.v1.html(
         """
         <script>
@@ -145,52 +152,51 @@ def display_chat(temp_message: str = None):
         height=0,
     )
 
-with right_col:
-    # Clear chat button to erase previous chats
-    if st.button("Clear Chat"):
-        st.session_state.chat_history = []
-        st.session_state.conversation_summary = "No previous conversation."
-        if Path(SUMMARY_FILE).exists():
-            os.remove(SUMMARY_FILE)
-        left_container.empty()
-    
-    user_input = st.text_input("Your Message:", key="user_input_field")
-    if st.button("Send") and user_input:
-        # Append user's message and update display
-        st.session_state.chat_history.append(("User", user_input))
-        display_chat()
+# Display current chat history
+display_chat()
 
-        # Retrieve context from ChromaDB
-        results = query_chromadb(user_input)
-        retrieved_docs = results.get("documents", [])
-        flat_docs = [doc for sublist in retrieved_docs for doc in sublist]
-        docs_str = "\n".join(flat_docs)
-        
-        prompt = (
-            "You are an expert customer service assistant. Use the following information to answer the client's query.\n\n"
-            f"Conversation History:\n{st.session_state.conversation_summary}\n\n"
-            f"Client Query: {user_input}\n\n"
-            "## Retrieved Context from Website Knowledge Base:\n"
-            f"{docs_str}\n\n"
-            "Provide a clear, accurate, and detailed answer. "
-            "If the context is incomplete, mention any assumptions and suggest what additional details might be needed."
-        )
-        
-        # Stream bot response while updating the chat container
-        bot_msg = ""
-        stream = model.generate_content([prompt], stream=True)
-        for chunk in stream:
-            bot_msg += chunk.text
-            display_chat(temp_message=bot_msg)
-            time.sleep(0.1)
-        
-        # Append bot response and update conversation summary
-        st.session_state.chat_history.append(("Bot", bot_msg))
-        new_turn = f"User: {user_input}\nBot: {bot_msg}"
-        st.session_state.conversation_summary = update_conversation_summary(
-            st.session_state.conversation_summary, [new_turn]
-        )
-        st.session_state.conversation_summary = check_and_summarize(
-            st.session_state.conversation_summary
-        )
-        save_conversation_summary(st.session_state.conversation_summary)
+# Input area for user message
+user_input = st.text_input("Your Message:", key="user_input_field")
+
+if st.button("Send") and user_input:
+    # Append user message to history and update display
+    st.session_state.chat_history.append(("User", user_input))
+    display_chat()
+
+    # Build prompt with retrieved context
+    results = query_chromadb(user_input)
+    retrieved_docs = results.get("documents", [])
+    flat_docs = [doc for sublist in retrieved_docs for doc in sublist]
+    docs_str = "\n".join(flat_docs)
+    
+    prompt = (
+        "You are an expert customer service assistant. Use the following information to answer the client's query.\n\n"
+        f"Conversation History:\n{st.session_state.conversation_summary}\n\n"
+        f"Client Query: {user_input}\n\n"
+        "## Retrieved Context from Website Knowledge Base:\n"
+        f"{docs_str}\n\n"
+        "Provide a clear, accurate, and detailed answer. "
+        "If the context is incomplete, mention any assumptions and suggest what additional details might be needed."
+    )
+    
+    # Generate and stream bot response
+    placeholder = st.empty()
+    answer_chunks = []
+    bot_response = ""
+    stream = model.generate_content([prompt], stream=True)
+    for chunk in stream:
+        answer_chunks.append(chunk.text)
+        bot_response = "".join(answer_chunks)
+        placeholder.markdown(f'<div class="chat-message bot"><strong>Bot:</strong> {bot_response}</div>', unsafe_allow_html=True)
+        time.sleep(0.1)
+    placeholder.empty()
+    
+    # Append full bot response and update conversation summary
+    st.session_state.chat_history.append(("Bot", bot_response))
+    new_turn = f"User: {user_input}\nBot: {bot_response}"
+    st.session_state.conversation_summary = update_conversation_summary(st.session_state.conversation_summary, [new_turn])
+    st.session_state.conversation_summary = check_and_summarize(st.session_state.conversation_summary)
+    save_conversation_summary(st.session_state.conversation_summary)
+    
+    # Update chat display
+    display_chat()
