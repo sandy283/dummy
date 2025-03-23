@@ -55,15 +55,14 @@ def summarize_text(text: str) -> str:
         "Summary:"
     )
     response = model.generate_content([prompt])
-    summarized = response.text.strip()
-    return summarized
+    return response.text.strip()
 
 def check_and_summarize(summary: str) -> str:
     if count_tokens(summary) > TOKEN_THRESHOLD:
         return summarize_text(summary)
     return summary
 
-# Inject custom CSS for creative, ChatGPT-style UI with icons
+# Inject custom CSS for a creative ChatGPT-like UI with icons
 st.markdown(
     """
     <style>
@@ -96,7 +95,6 @@ st.markdown(
       text-align: left;
       border: 1px solid #ddd;
     }
-    /* Add icons using pseudo-elements */
     .chat-message.user::before {
       content: "👤 ";
       font-size: 1.2em;
@@ -130,16 +128,21 @@ if "chat_history" not in st.session_state:
 if "conversation_summary" not in st.session_state:
     st.session_state.conversation_summary = load_conversation_summary()
 
-# Function to display chat messages with auto-scroll
-def display_chat():
+# Create a persistent container for chat history
+chat_box = st.empty()
+
+def display_chat(temp_message: str = ""):
     chat_html = '<div id="chat_container">'
     for speaker, message in st.session_state.chat_history:
         if speaker.lower() == "user":
             chat_html += f'<div class="chat-message user"><strong>User:</strong> {message}</div>'
         else:
             chat_html += f'<div class="chat-message bot"><strong>Bot:</strong> {message}</div>'
+    # Append temporary streaming bot message if provided
+    if temp_message:
+        chat_html += f'<div class="chat-message bot"><strong>Bot:</strong> {temp_message}</div>'
     chat_html += "</div>"
-    st.markdown(chat_html, unsafe_allow_html=True)
+    chat_box.markdown(chat_html, unsafe_allow_html=True)
     st.components.v1.html(
         """
         <script>
@@ -152,52 +155,50 @@ def display_chat():
         height=0,
     )
 
-# Display current chat history
+# Display the persistent chat history container
 display_chat()
 
 # Input area for user message
 user_input = st.text_input("Your Message:", key="user_input_field")
 
 if st.button("Send") and user_input:
-    # Append user message to history and update display
+    # Append the user's message
     st.session_state.chat_history.append(("User", user_input))
     display_chat()
-
-    # Build prompt with retrieved context
+    
+    # Retrieve relevant context from ChromaDB
     results = query_chromadb(user_input)
     retrieved_docs = results.get("documents", [])
     flat_docs = [doc for sublist in retrieved_docs for doc in sublist]
     docs_str = "\n".join(flat_docs)
     
+    # New prompt with reset instructions:
     prompt = (
         "You are an expert customer service assistant. Use the following information to answer the client's query.\n\n"
         f"Conversation History:\n{st.session_state.conversation_summary}\n\n"
         f"Client Query: {user_input}\n\n"
         "## Retrieved Context from Website Knowledge Base:\n"
         f"{docs_str}\n\n"
-        "Provide a clear, accurate, and detailed answer. "
-        "If the retrieved context is incomplete or irrelevant to the user query, don't frame your answer. Just answer politely i don't know."
-        "When you don't see any relevance of users query to the retrieved context, you are allowed to assume and answer on your own but do mention [ASSUMPTION] tag before mentioning anything which is not in the retrieved context."
+        "Provide a clear, accurate, and detailed answer. If the retrieved context is incomplete or irrelevant to the user's query, simply reply politely 'I don't know.' "
+        "When you need to assume details beyond the retrieved context, prepend your answer with the tag [ASSUMPTION] before mentioning any information not found in the context."
     )
     
-    # Generate and stream bot response
-    placeholder = st.empty()
-    answer_chunks = []
+    # Stream the bot's response while updating the same persistent chat container
     bot_response = ""
     stream = model.generate_content([prompt], stream=True)
     for chunk in stream:
-        answer_chunks.append(chunk.text)
-        bot_response = "".join(answer_chunks)
-        placeholder.markdown(f'<div class="chat-message bot"><strong>Bot:</strong> {bot_response}</div>', unsafe_allow_html=True)
+        bot_response += chunk.text
+        display_chat(temp_message=bot_response)
         time.sleep(0.1)
-    placeholder.empty()
     
-    # Append full bot response and update conversation summary
+    # Append the final bot response and update the conversation summary
     st.session_state.chat_history.append(("Bot", bot_response))
     new_turn = f"User: {user_input}\nBot: {bot_response}"
-    st.session_state.conversation_summary = update_conversation_summary(st.session_state.conversation_summary, [new_turn])
+    st.session_state.conversation_summary = update_conversation_summary(
+        st.session_state.conversation_summary, [new_turn]
+    )
     st.session_state.conversation_summary = check_and_summarize(st.session_state.conversation_summary)
     save_conversation_summary(st.session_state.conversation_summary)
     
-    # Update chat display
+    # Final update to the persistent chat container
     display_chat()
