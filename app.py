@@ -7,9 +7,11 @@ from chromadb.config import Settings
 import google.generativeai as genai
 from sentence_transformers import SentenceTransformer
 
+# Constants
 SUMMARY_FILE = "chat_summary.txt"
 TOKEN_THRESHOLD = 2000
 
+# Initialize embeddings and ChromaDB client
 embedder = SentenceTransformer('all-MiniLM-L6-v2')
 client = chromadb.Client(Settings(
     chroma_db_impl="duckdb+parquet",
@@ -24,44 +26,6 @@ def query_chromadb(user_query: str):
         n_results=3
     )
     return results
-
-st.title("Customer Service Chatbot")
-
-# Ask user to upload their Google Credentials JSON file
-uploaded_credentials = st.file_uploader("Upload Google Credentials JSON", type="json")
-if uploaded_credentials is not None:
-    credentials_path = "google_credentials.json"
-    with open(credentials_path, "wb") as f:
-        f.write(uploaded_credentials.getbuffer())
-    os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = credentials_path
-    # Initialize the generative model only after credentials are provided
-    model = genai.GenerativeModel('gemini-2.0-flash')
-else:
-    st.error("Please upload your Google Credentials JSON file to continue.")
-    st.stop()
-
-def generate_answer_with_history(user_query: str, conversation_summary: str, delay: float = 0.1) -> str:
-    results = query_chromadb(user_query)
-    retrieved_docs = results.get("documents", [])
-    flat_docs = [doc for sublist in retrieved_docs for doc in sublist]
-    docs_str = "\n".join(flat_docs)
-    
-    prompt = (
-        "You are an expert customer service assistant. Use the following information to answer the client's query.\n\n"
-        f"Conversation History:\n{conversation_summary}\n\n"
-        f"Client Query: {user_query}\n\n"
-        "## Retrieved Context from Website Knowledge Base:\n"
-        f"{docs_str}\n\n"
-        "Provide a clear, accurate, and detailed answer. "
-        "If the context is incomplete, mention any assumptions and suggest what additional details might be needed."
-    )
-    
-    stream = model.generate_content([prompt], stream=True)
-    answer_parts = []
-    for chunk in stream:
-        answer_parts.append(chunk.text)
-        time.sleep(delay)
-    return "".join(answer_parts)
 
 def update_conversation_summary(current_summary: str, conversation_buffer: list) -> str:
     new_turns = "\n".join(conversation_buffer)
@@ -100,53 +64,126 @@ def check_and_summarize(summary: str) -> str:
         return summarize_text(summary)
     return summary
 
+# Inject custom CSS for ChatGPT-like UI
+st.markdown(
+    """
+    <style>
+    #chat_container {
+      height: 500px;
+      overflow-y: auto;
+      border: 1px solid #ccc;
+      padding: 10px;
+      background-color: #f9f9f9;
+    }
+    .chat-message {
+      margin: 10px 0;
+      padding: 10px;
+      border-radius: 10px;
+      max-width: 70%;
+      word-wrap: break-word;
+    }
+    .chat-message.user {
+      background-color: #DCF8C6;
+      margin-left: auto;
+      text-align: right;
+    }
+    .chat-message.bot {
+      background-color: #F1F0F0;
+      margin-right: auto;
+      text-align: left;
+    }
+    </style>
+    """,
+    unsafe_allow_html=True
+)
+
+st.title("Customer Service Chatbot")
+
+# Upload Google Credentials JSON file
+uploaded_credentials = st.file_uploader("Upload Google Credentials JSON", type="json")
+if uploaded_credentials is not None:
+    credentials_path = "google_credentials.json"
+    with open(credentials_path, "wb") as f:
+        f.write(uploaded_credentials.getbuffer())
+    os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = credentials_path
+    model = genai.GenerativeModel('gemini-2.0-flash')
+else:
+    st.error("Please upload your Google Credentials JSON file to continue.")
+    st.stop()
+
+# Initialize session state
 if "chat_history" not in st.session_state:
     st.session_state.chat_history = []
 if "conversation_summary" not in st.session_state:
     st.session_state.conversation_summary = load_conversation_summary()
 
-user_input = st.text_input("Your Message:", key="user_input")
+# Function to display chat messages with auto-scroll
+def display_chat():
+    chat_html = '<div id="chat_container">'
+    for speaker, message in st.session_state.chat_history:
+        if speaker.lower() == "user":
+            chat_html += f'<div class="chat-message user"><strong>User:</strong> {message}</div>'
+        else:
+            chat_html += f'<div class="chat-message bot"><strong>Bot:</strong> {message}</div>'
+    chat_html += "</div>"
+    st.markdown(chat_html, unsafe_allow_html=True)
+    st.components.v1.html(
+        """
+        <script>
+          var chatContainer = document.getElementById('chat_container');
+          if(chatContainer) {
+            chatContainer.scrollTop = chatContainer.scrollHeight;
+          }
+        </script>
+        """,
+        height=0,
+    )
+
+# Display current chat history
+display_chat()
+
+# Input area for user message
+user_input = st.text_input("Your Message:", key="user_input_field")
 
 if st.button("Send") and user_input:
+    # Append user message to history and update display
     st.session_state.chat_history.append(("User", user_input))
+    display_chat()
+
+    # Build prompt with retrieved context
+    results = query_chromadb(user_input)
+    retrieved_docs = results.get("documents", [])
+    flat_docs = [doc for sublist in retrieved_docs for doc in sublist]
+    docs_str = "\n".join(flat_docs)
     
+    prompt = (
+        "You are an expert customer service assistant. Use the following information to answer the client's query.\n\n"
+        f"Conversation History:\n{st.session_state.conversation_summary}\n\n"
+        f"Client Query: {user_input}\n\n"
+        "## Retrieved Context from Website Knowledge Base:\n"
+        f"{docs_str}\n\n"
+        "Provide a clear, accurate, and detailed answer. "
+        "If the context is incomplete, mention any assumptions and suggest what additional details might be needed."
+    )
+    
+    # Generate and stream bot response
     placeholder = st.empty()
+    answer_chunks = []
+    stream = model.generate_content([prompt], stream=True)
     bot_response = ""
-    with placeholder.container():
-        st.write("Bot: ")
-        answer_chunks = []
-        results = query_chromadb(user_input)
-        retrieved_docs = results.get("documents", [])
-        flat_docs = [doc for sublist in retrieved_docs for doc in sublist]
-        docs_str = "\n".join(flat_docs)
-        
-        prompt = (
-            "You are an expert customer service assistant. Use the following information to answer the client's query.\n\n"
-            f"Conversation History:\n{st.session_state.conversation_summary}\n\n"
-            f"Client Query: {user_input}\n\n"
-            "## Retrieved Context from Website Knowledge Base:\n"
-            f"{docs_str}\n\n"
-            "Provide a clear, accurate, and detailed answer. "
-            "If the context is incomplete, mention any assumptions and suggest what additional details might be needed."
-        )
-        stream = model.generate_content([prompt], stream=True)
-        for chunk in stream:
-            answer_chunks.append(chunk.text)
-            bot_response = "".join(answer_chunks)
-            placeholder.text("Bot: " + bot_response)
-            time.sleep(0.1)
+    for chunk in stream:
+        answer_chunks.append(chunk.text)
+        bot_response = "".join(answer_chunks)
+        placeholder.markdown(f'<div class="chat-message bot"><strong>Bot:</strong> {bot_response}</div>', unsafe_allow_html=True)
+        time.sleep(0.1)
+    placeholder.empty()
     
+    # Append full bot response and update conversation summary
     st.session_state.chat_history.append(("Bot", bot_response))
-    
     new_turn = f"User: {user_input}\nBot: {bot_response}"
     st.session_state.conversation_summary = update_conversation_summary(st.session_state.conversation_summary, [new_turn])
     st.session_state.conversation_summary = check_and_summarize(st.session_state.conversation_summary)
     save_conversation_summary(st.session_state.conversation_summary)
     
-    # st.session_state.user_input = ""
-
-for speaker, message in st.session_state.chat_history:
-    if speaker == "User":
-        st.markdown(f"**User:** {message}")
-    else:
-        st.markdown(f"**Bot:** {message}")
+    # Update chat display
+    display_chat()
