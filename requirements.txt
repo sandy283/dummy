@@ -1,7 +1,4 @@
 chromadb==0.3.29
 google-generativeai
 pydantic==1.10.11
-json
-ast
-pathlib
 sentence-transformers
