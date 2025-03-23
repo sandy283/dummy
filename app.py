@@ -117,9 +117,9 @@ if "chat_history" not in st.session_state:
 if "conversation_summary" not in st.session_state:
     st.session_state.conversation_summary = load_conversation_summary()
 
-# Create two columns: left for chat history, right for input
+# Create two columns: left for chat history, right for input & controls
 left_col, right_col = st.columns([3, 1])
-left_container = left_col.empty()  # Container for the single chat box
+left_container = left_col.empty()  # Single chat history container
 
 def display_chat(temp_message: str = None):
     chat_html = '<div id="chat_container">'
@@ -128,7 +128,7 @@ def display_chat(temp_message: str = None):
             chat_html += f'<div class="chat-message user"><strong>User:</strong> {message}</div>'
         else:
             chat_html += f'<div class="chat-message bot"><strong>Bot:</strong> {message}</div>'
-    # Append temporary bot message (streaming) if provided
+    # Append temporary bot message if provided (for streaming)
     if temp_message:
         chat_html += f'<div class="chat-message bot"><strong>Bot:</strong> {temp_message}</div>'
     chat_html += "</div>"
@@ -146,9 +146,17 @@ def display_chat(temp_message: str = None):
     )
 
 with right_col:
+    # Clear chat button to erase previous chats
+    if st.button("Clear Chat"):
+        st.session_state.chat_history = []
+        st.session_state.conversation_summary = "No previous conversation."
+        if Path(SUMMARY_FILE).exists():
+            os.remove(SUMMARY_FILE)
+        left_container.empty()
+    
     user_input = st.text_input("Your Message:", key="user_input_field")
     if st.button("Send") and user_input:
-        # Append user's message and update chat history display
+        # Append user's message and update display
         st.session_state.chat_history.append(("User", user_input))
         display_chat()
 
@@ -168,7 +176,7 @@ with right_col:
             "If the context is incomplete, mention any assumptions and suggest what additional details might be needed."
         )
         
-        # Stream bot response while updating the single chat container
+        # Stream bot response while updating the chat container
         bot_msg = ""
         stream = model.generate_content([prompt], stream=True)
         for chunk in stream:
@@ -176,7 +184,7 @@ with right_col:
             display_chat(temp_message=bot_msg)
             time.sleep(0.1)
         
-        # Append bot response to conversation history
+        # Append bot response and update conversation summary
         st.session_state.chat_history.append(("Bot", bot_msg))
         new_turn = f"User: {user_input}\nBot: {bot_msg}"
         st.session_state.conversation_summary = update_conversation_summary(
@@ -186,4 +194,3 @@ with right_col:
             st.session_state.conversation_summary
         )
         save_conversation_summary(st.session_state.conversation_summary)
-        # Optionally, clear input by using a different key or instructing the user to overwrite the field.
