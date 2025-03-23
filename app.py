@@ -143,7 +143,7 @@ if st.button("Send") and user_input:
     st.session_state.conversation_summary = check_and_summarize(st.session_state.conversation_summary)
     save_conversation_summary(st.session_state.conversation_summary)
     
-    st.session_state.user_input = ""
+    # st.session_state.user_input = ""
 
 for speaker, message in st.session_state.chat_history:
     if speaker == "User":
